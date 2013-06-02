@@ -210,6 +210,7 @@ cdef extern from 'alsa/asoundlib.h':
 	ctypedef long unsigned int snd_pcm_uframes_t
 	ctypedef long int snd_pcm_sframes_t
 	snd_pcm_sframes_t snd_pcm_writei(snd_pcm_t *, void *, snd_pcm_uframes_t)
+	snd_pcm_sframes_t snd_pcm_readi(snd_pcm_t *, void *, snd_pcm_uframes_t)
 	int snd_pcm_sw_params_set_avail_min(snd_pcm_t *, snd_pcm_sw_params_t *, snd_pcm_uframes_t)
 	char * snd_strerror(int)
 	int snd_device_name_hint(int, char *, void * * *)

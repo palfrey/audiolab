@@ -89,7 +89,7 @@ cdef struct format_info:
         int byte_fmt
 
 cdef class AlsaDevice:
-        cdef snd_pcm_t *handle
+        cdef snd_pcm_t *playback_handle, *record_handle
         cdef format_info format
         def __init__(AlsaDevice self, unsigned int fs=48000, int nchannels=1):
                 cdef int st
@@ -102,18 +102,30 @@ cdef class AlsaDevice:
                         raise ValueError,\
                               "Only mono/stereo signals supported for now"
 
-                self.handle = <snd_pcm_t*>0
-                st = snd_pcm_open(&self.handle, "default", SND_PCM_STREAM_PLAYBACK, 0)
+                self.playback_handle = <snd_pcm_t*>0
+                st = snd_pcm_open(&self.playback_handle, "default", SND_PCM_STREAM_PLAYBACK, 0)
                 if st < 0:
-                        raise AlsaException("Fail opening 'default'")
+                        raise AlsaException("Fail opening 'default' playback")
+                self.record_handle = <snd_pcm_t*>0
+                st = snd_pcm_open(&self.record_handle, "default", SND_PCM_STREAM_CAPTURE, 0)
+                if st < 0:
+                        raise AlsaException("Fail opening 'default' record")
 
-                set_hw_params(self.handle, self.format, &psize, &bsize)
-                print "Period size is", psize, ", Buffer size is", bsize
+                set_hw_params(self.playback_handle, self.format, &psize, &bsize)
+                #print "Period size is", psize, ", Buffer size is", bsize
 
-                set_sw_params(self.handle, psize, bsize)
+                set_sw_params(self.playback_handle, psize, bsize)
+
+                set_hw_params(self.record_handle, self.format, &psize, &bsize)
+                #print "(Record) period size is", psize, ", Buffer size is", bsize
+
+                set_sw_params(self.record_handle, psize, bsize)
 
         def play(AlsaDevice self, cnp.ndarray input):
                 self._play(input)
+
+        def record(AlsaDevice self, int output):
+                return self._record(output)
 
         cdef int _play(AlsaDevice self, cnp.ndarray input) except -1:
                 cdef cnp.ndarray[cnp.int16_t, ndim=2] tx
@@ -133,7 +145,7 @@ cdef class AlsaDevice:
                 tx = np.empty((nc, bufsize), dtype=np.int16)
                 nr = input.size / nc / bufsize
 
-                st = snd_pcm_prepare(self.handle)
+                st = snd_pcm_prepare(self.playback_handle)
                 if st:
                         raise AlsaException("Error while preparing the pcm device")
 
@@ -147,20 +159,59 @@ cdef class AlsaDevice:
                                 32568 * input[:, i * bufsize:
                                                  i * bufsize + bufsize],
                                 np.int16)
-                        st = snd_pcm_writei(self.handle, <void*>tx.data, bufsize)
+                        st = snd_pcm_writei(self.playback_handle, <void*>tx.data, bufsize)
                         if st < 0:
                                 raise AlsaException("Error in writei")
 
                 if err:
                         print "Got SIGINT: draining the pcm device... "
-                        snd_pcm_drain(self.handle)
+                        snd_pcm_drain(self.playback_handle)
                         return -1
-                snd_pcm_drain(self.handle)
+                snd_pcm_drain(self.playback_handle)
                 return 0
 
+        cdef cnp.ndarray[cnp.int16_t, ndim=2] _record(AlsaDevice self, int length):
+                cdef int nr, i, nc
+                cdef int bufsize = 1024
+                cdef int err = 0
+                cdef cnp.ndarray[cnp.int16_t, ndim=2] rx
+                cdef cnp.ndarray[cnp.int16_t, ndim=2] output
+
+                nc = self.format.nchannels
+                nr = length / bufsize
+
+                st = snd_pcm_prepare(self.record_handle)
+                if st:
+                        raise AlsaException("Error while preparing the pcm device")
+
+                output = None
+
+                rx = np.zeros((nc, bufsize), dtype=np.int16, order = 'F')
+                for i in range(nr):
+                        err = cpython.PyErr_CheckSignals()
+                        if err != 0:
+                                break
+                        st = snd_pcm_readi(self.record_handle, <void*>rx.data, bufsize)
+                        if st < 0:
+                                raise AlsaException("Error in readi")
+                        if output == None:
+                            output = rx
+                        else:
+                            output = np.hstack((output, rx))
+
+                if err:
+                        print "Got SIGINT: draining the pcm device... "
+                        snd_pcm_drain(self.record_handle)
+                        return None
+                snd_pcm_drain(self.record_handle)
+                return output / 32568.0 # floats, not ints
+
+
         def __dealloc__(AlsaDevice self):
-                if self.handle:
-                        snd_pcm_close(self.handle)
+                if self.playback_handle:
+                        snd_pcm_close(self.playback_handle)
+                if self.record_handle:
+                        snd_pcm_close(self.record_handle)
 
 cdef set_hw_params(snd_pcm_t *hdl, format_info info, snd_pcm_uframes_t* period_size, snd_pcm_uframes_t *buffer_size):
         cdef unsigned int nchannels, buftime, pertime, samplerate

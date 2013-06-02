@@ -33,7 +33,7 @@ __sndfile_version__ = ".".join([str(i) for i in sndfile_version()])
 #        sdifread, wavwrite, aiffwrite, flacwrite, auwrite, sdifwrite
 from pysndfile.matapi import *
 
-from soundio import play
+from soundio import play, record
 __all__ = filter(lambda s:not s.startswith('_'),dir())
 
 from numpy.testing import Tester

@@ -34,3 +34,6 @@ __all__ = []
 
 from play import play
 __all__ += ["play"]
+
+from record import record
+__all__ += ["record"]
